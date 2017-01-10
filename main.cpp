@@ -152,7 +152,7 @@ FunctionAST *ErrorF(const char *Str) {
 
 static ExprAST *ParseExpression();
 
-// number
+/// numberexpr ::= number
 static ExprAST *ParseNumberExpr() {
 	ExprAST *Result = new NumberExprAST(NumVal);
 	getNextToken();
@@ -160,6 +160,7 @@ static ExprAST *ParseNumberExpr() {
 }
 
 // 括号表达式 '('expression')'
+/// parenexpr ::= '('expression')'
 static ExprAST *ParseParenExpr() {
 	getNextToken(); //'('
 	
@@ -174,6 +175,9 @@ static ExprAST *ParseParenExpr() {
 
 // 变量引用： identifier
 // 函数调用： identifier'('expression')'
+/// identifierexpr
+/// ::= identifier
+/// ::= identifier '(' expression* ')'
 static ExprAST *ParseIdentifierExpr() {
 	std::string IdName = IdentifierStr;
 
@@ -182,7 +186,7 @@ static ExprAST *ParseIdentifierExpr() {
 	if (CurTok != '(') //变量引用
 		return new VariableExprAST(IdName);
 	// 函数调用
-	getNextToken(); // '('
+	getNextToken(); // eat '('
 	std::vector<ExprAST*> Args;
 	if (CurTok != ')') {
 		while (1) {
@@ -198,10 +202,15 @@ static ExprAST *ParseIdentifierExpr() {
 		}
 	}
 
-	getNextToken(); // ')'
+	getNextToken(); // eat ')'
 	return new CallExprAST(IdName, Args);
 }
 
+// 一元表达式
+/// primary
+/// ::= identifier
+/// ::= numberexpr
+/// ::= parenexpr
 static ExprAST *ParsePrimary() {
 	switch (CurTok)
 	{
@@ -212,6 +221,8 @@ static ExprAST *ParsePrimary() {
 	}
 }
 
+/// binoprhs
+/// ::= ('+' primary)*
 static ExprAST *ParseBinOpRHS(int ExprPrec, ExprAST *LHS)
 {
 	while (1) {
@@ -235,6 +246,8 @@ static ExprAST *ParseBinOpRHS(int ExprPrec, ExprAST *LHS)
 	}
 }
 
+/// expression
+/// ::= primary binoprhs
 static ExprAST *ParseExpression() {
 	ExprAST *LHS = ParsePrimary();
 	if (!LHS) return 0;
@@ -242,6 +255,8 @@ static ExprAST *ParseExpression() {
 	return ParseBinOpRHS(0, LHS);
 }
 // 函数原型
+/// prototype
+/// ::= id '(' id* ')'
 static PrototypeAST *ParsePrototype() {
 	if (CurTok != tok_identifier)
 		return ErrorP("Expected function name in prototype");
@@ -255,7 +270,7 @@ static PrototypeAST *ParsePrototype() {
 	std::vector<std::string> ArgNames;
 	while (getNextToken() == tok_identifier)
 		ArgNames.push_back(IdentifierStr);
-	if (CurTok != ')')
+	if (CurTok != ')') // eat ')'
 		return ErrorP("Expected ')' in prototype");
 
 	getNextToken();
@@ -263,9 +278,10 @@ static PrototypeAST *ParsePrototype() {
 	return new PrototypeAST(FnName, ArgNames);
 }
 
-// 
+/// definition
+/// ::= 'def' prototype expression
 static FunctionAST *ParseDefinition() {
-	getNextToken();
+	getNextToken(); //eat def.
 	PrototypeAST *Proto = ParsePrototype();
 	if (Proto == 0) return 0;
 
@@ -274,12 +290,16 @@ static FunctionAST *ParseDefinition() {
 	return 0;
 }
 
+/// external
+/// ::= 'extern' prototype
 static PrototypeAST *ParseExtern() {
 	getNextToken();
 	return ParsePrototype();
 }
 
 // 顶层表达式
+/// toplevelexpr
+/// ::= expression
 static FunctionAST *ParseTopLevelExpr() {
 	if (ExprAST *E = ParseExpression()) {
 		PrototypeAST *Proto = new PrototypeAST("", std::vector<std::string>());
@@ -322,6 +342,8 @@ static void HandleTopLevelExpression()
 	}
 }
 
+/// top
+/// ::= definition | external | expression | ';'
 static void MainLoop() {
 	while (1) {
 		fprintf(stderr, "ready> ");
