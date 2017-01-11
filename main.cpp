@@ -1,8 +1,8 @@
-﻿#include <llvm/IR/Verifier.h>
-#include <llvm/IR/DerivedTypes.h>
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
+﻿#include "llvm/IR/Verifier.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -119,6 +119,10 @@ namespace {
 	public:
 		PrototypeAST(const std::string &name, const std::vector<std::string> args)
 			:Name(name), Args(std::move(args)) {}
+		Function *Codegen();
+		const std::string &getName() const {
+			return Name;
+		}
 	};
 
 	class FunctionAST {
@@ -127,6 +131,8 @@ namespace {
 	public:
 		FunctionAST(std::unique_ptr<PrototypeAST> proto, std::unique_ptr<ExprAST> body)
 			:Proto(std::move(proto)), Body(std::move(body)) {}
+
+		Function *Codegen();
 	};
 }
 
@@ -348,6 +354,86 @@ Value *VariableExprAST::Codegen() {
 	return V;
 }
 
+Value *BinaryExprAST::Codegen() {
+	Value *L = LHS->Codegen();
+	Value *R = LHS->Codegen();
+	if (!L || !R)
+		return nullptr;
+
+	switch (Op)
+	{
+	case '+':
+		return Builder.CreateFAdd(L, R, "addtmp");
+	case '-':
+		return Builder.CreateFSub(L, R, "subtmp");
+	case '*':
+		return Builder.CreateFMul(L, R, "multmp");
+	case '<':
+		L = Builder.CreateFCmpULT(L, R, "cmptmp");
+		return Builder.CreateUIToFP(L, Type::getDoubleTy(TheContext), "booltmp");
+	default:
+		return LogErrorV("invalid binary operatior");
+	}
+}
+
+Value *CallExprAST::Codegen() {
+	Function *CalleeF = TheModule->getFunction(Callee);
+	if (!CalleeF)
+		return LogErrorV("Unknown function referenced");
+
+	if (CalleeF->arg_size() != Args.size())
+		return LogErrorV("Incorrect # arguments passed");
+
+	std::vector<Value *> ArgsV;
+	for (unsigned i = 0, e = Args.size(); i != e; ++i) {
+		ArgsV.push_back(Args[i]->Codegen());
+		if (!ArgsV.back())
+			return nullptr;
+	}
+	return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
+}
+
+Function *PrototypeAST::Codegen() {
+	std::vector<Type*> Doubles(Args.size(), Type::getDoubleTy(TheContext));
+	FunctionType *FT = FunctionType::get(Type::getDoubleTy(TheContext), Doubles, false);
+
+	Function *F = Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
+
+	unsigned Idx = 0;
+	for (auto &Arg : F->args())
+		Arg.setName(Args[Idx++]);
+	
+	return F;
+}
+
+Function *FunctionAST::Codegen() {
+	Function *TheFunction = TheModule->getFunction(Proto->getName());
+
+	if (!TheFunction)
+		TheFunction = Proto->Codegen();
+	
+	if (!TheFunction)
+		return nullptr;
+	
+	BasicBlock *BB = BasicBlock::Create(TheContext, "entry", TheFunction);
+	Builder.SetInsertPoint(BB);
+
+	NamedValues.clear();
+	for (auto &Arg : TheFunction->args())
+		NamedValues[Arg.getName()] = &Arg;
+
+	if (Value *RetVal = Body->Codegen()) {
+		Builder.CreateRet(RetVal);
+		
+		verifyFunction(*TheFunction);
+
+		return TheFunction;
+	}
+
+	TheFunction->eraseFromParent();
+	return nullptr;
+}
+
 //===----------------------------------------------------------------------===//
 // Top-Level parsing
 //===----------------------------------------------------------------------===//
@@ -417,7 +503,12 @@ int main() {
 
 	fprintf(stderr, "ready> ");
 	getNextToken();
+
+	TheModule = llvm::make_unique<Module>("my cool jit", TheContext);
+
 	MainLoop();
+
+	TheModule->dump();
     
     return 0;
 }
