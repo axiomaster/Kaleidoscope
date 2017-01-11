@@ -1,8 +1,8 @@
-﻿#include "llvm/IR/Verifier.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
+﻿#include <llvm/IR/Verifier.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
 
 #include <cstdlib>
 #include <cstdio>
@@ -73,7 +73,7 @@ static int gettok() {
 namespace {
 	class ExprAST {
 	public:
-		virtual ~ExprAST() {}
+		virtual ~ExprAST() = default;
 		virtual Value *Codegen() = 0;
 	};
 
@@ -95,20 +95,20 @@ namespace {
 	// 运算符
 	class BinaryExprAST :public ExprAST {
 		char Op;
-		ExprAST *LHS, *RHS;
+		std::unique_ptr<ExprAST> LHS, RHS;
 	public:
-		BinaryExprAST(char op, ExprAST *lhs, ExprAST *rhs)
-			:Op(op), LHS(lhs), RHS(rhs) {}
+		BinaryExprAST(char op, std::unique_ptr<ExprAST> lhs, std::unique_ptr<ExprAST> rhs)
+			:Op(op), LHS(std::move(lhs)), RHS(std::move(rhs)) {}
 		virtual Value *Codegen();
 	};
 
 	// 函数调用？？？
 	class CallExprAST :public ExprAST {
 		std::string Callee;
-		std::vector<ExprAST*> Args;
+		std::vector<std::unique_ptr<ExprAST>> Args;
 	public:
-		CallExprAST(const std::string &callee, std::vector<ExprAST*> &args)
-			: Callee(callee), Args(args) {}
+		CallExprAST(const std::string &callee, std::vector<std::unique_ptr<ExprAST>> args)
+			: Callee(callee), Args(std::move(args)) {}
 		virtual Value *Codegen();
 	};
 
@@ -117,16 +117,16 @@ namespace {
 		std::string Name;
 		std::vector<std::string> Args;
 	public:
-		PrototypeAST(const std::string &name, const std::vector<std::string> &args)
-			:Name(name), Args(args) {}
+		PrototypeAST(const std::string &name, const std::vector<std::string> args)
+			:Name(name), Args(std::move(args)) {}
 	};
 
 	class FunctionAST {
-		PrototypeAST *Proto;
-		ExprAST *Body;
+		std::unique_ptr<PrototypeAST> Proto;
+		std::unique_ptr<ExprAST> Body;
 	public:
-		FunctionAST(PrototypeAST *proto, ExprAST *body)
-			:Proto(proto), Body(body) {}
+		FunctionAST(std::unique_ptr<PrototypeAST> proto, std::unique_ptr<ExprAST> body)
+			:Proto(std::move(proto)), Body(std::move(body)) {}
 	};
 }
 
@@ -151,38 +151,38 @@ static int GetTokPrecedence() {
 }
 
 /// Error
-ExprAST *Error(const char *Str) {
+std::unique_ptr<ExprAST> LogError(const char *Str) {
 	fprintf(stderr, "Error: %s\n", Str);
 	return 0;
 }
-PrototypeAST *ErrorP(const char *Str) {
-	Error(Str);
+std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
+	LogError(Str);
 	return 0;
 }
-FunctionAST *ErrorF(const char *Str) {
-	Error(Str);
-	return 0;
-}
+//FunctionAST *LogErrorF(const char *Str) {
+//	LogError(Str);
+//	return 0;
+//}
 
-static ExprAST *ParseExpression();
+static std::unique_ptr<ExprAST> ParseExpression();
 
 /// numberexpr ::= number
-static ExprAST *ParseNumberExpr() {
-	ExprAST *Result = new NumberExprAST(NumVal);
+static std::unique_ptr<ExprAST> ParseNumberExpr() {
+	auto Result = llvm::make_unique<NumberExprAST>(NumVal);
 	getNextToken();
-	return Result;
+	return std::move(Result);
 }
 
 // 括号表达式 '('expression')'
 /// parenexpr ::= '('expression')'
-static ExprAST *ParseParenExpr() {
+static std::unique_ptr<ExprAST> ParseParenExpr() {
 	getNextToken(); //'('
 	
-	ExprAST *V = ParseExpression();
-	if (!V) return 0;
+	auto V = ParseExpression();
+	if (!V) return nullptr;
 	
 	if (CurTok != ')')
-		return Error("expected ')'");
+		return LogError("expected ')'");
 	getNextToken();
 	return V;
 }
@@ -192,32 +192,33 @@ static ExprAST *ParseParenExpr() {
 /// identifierexpr
 /// ::= identifier
 /// ::= identifier '(' expression* ')'
-static ExprAST *ParseIdentifierExpr() {
+static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 	std::string IdName = IdentifierStr;
 
 	getNextToken();
 	
 	if (CurTok != '(') //变量引用
-		return new VariableExprAST(IdName);
+		return llvm::make_unique<VariableExprAST>(IdName);
 	// 函数调用
 	getNextToken(); // eat '('
-	std::vector<ExprAST*> Args;
+	std::vector<std::unique_ptr<ExprAST>> Args;
 	if (CurTok != ')') {
-		while (1) {
-			ExprAST *Arg = ParseExpression();
-			if (!Arg) return 0;
-			Args.push_back(Arg);
+		while (true) {
+			if(auto Arg = ParseExpression())
+				return nullptr;
+			else
+				Args.push_back(std::move(Arg));
 
 			if (CurTok == ')') break;
 
 			if (CurTok != ',')
-				return Error("Expected ')' or ',' in argument list");
+				return LogError("Expected ')' or ',' in argument list");
 			getNextToken();
 		}
 	}
 
 	getNextToken(); // eat ')'
-	return new CallExprAST(IdName, Args);
+	return llvm::make_unique<CallExprAST>(IdName, Args);
 }
 
 // 一元表达式
@@ -225,10 +226,10 @@ static ExprAST *ParseIdentifierExpr() {
 /// ::= identifier
 /// ::= numberexpr
 /// ::= parenexpr
-static ExprAST *ParsePrimary() {
+static std::unique_ptr<ExprAST> ParsePrimary() {
 	switch (CurTok)
 	{
-	default: return Error("unknown token when expecting an expression");
+	default: return LogError("unknown token when expecting an expression");
 	case tok_identifier: return ParseIdentifierExpr();
 	case tok_number: return ParseNumberExpr();
 	case '(': return ParseParenExpr();
@@ -237,9 +238,9 @@ static ExprAST *ParsePrimary() {
 
 /// binoprhs
 /// ::= ('+' primary)*
-static ExprAST *ParseBinOpRHS(int ExprPrec, ExprAST *LHS)
+static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS)
 {
-	while (1) {
+	while (true) {
 		int TokPrec = GetTokPrecedence();
 
 		if (TokPrec < ExprPrec)
@@ -248,65 +249,65 @@ static ExprAST *ParseBinOpRHS(int ExprPrec, ExprAST *LHS)
 		int BinOp = CurTok;
 		getNextToken();
 
-		ExprAST *RHS = ParsePrimary();
-		if (!RHS) return 0;
+		auto RHS = ParsePrimary();
+		if (!RHS) return nullptr;
 
 		int NextPrec = GetTokPrecedence();
 		if (TokPrec < NextPrec) {
-			RHS = ParseBinOpRHS(TokPrec + 1, RHS);
+			RHS = ParseBinOpRHS(TokPrec + 1, std::move(RHS));
 			if (RHS == 0) return 0;
 		}
-		LHS = new BinaryExprAST(BinOp, LHS, RHS);
+		LHS = llvm::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
 	}
 }
 
 /// expression
 /// ::= primary binoprhs
-static ExprAST *ParseExpression() {
-	ExprAST *LHS = ParsePrimary();
-	if (!LHS) return 0;
+static std::unique_ptr<ExprAST> ParseExpression() {
+	auto LHS = ParsePrimary();
+	if (!LHS) return nullptr;
 	
-	return ParseBinOpRHS(0, LHS);
+	return ParseBinOpRHS(0, std::move(LHS));
 }
 // 函数原型
 /// prototype
 /// ::= id '(' id* ')'
-static PrototypeAST *ParsePrototype() {
+static std::unique_ptr<PrototypeAST> ParsePrototype() {
 	if (CurTok != tok_identifier)
-		return ErrorP("Expected function name in prototype");
+		return LogErrorP("Expected function name in prototype");
 
 	std::string FnName = IdentifierStr;
 	getNextToken();
 
 	if (CurTok != '(')
-		return ErrorP("Expected '(' in prototype");
+		return LogErrorP("Expected '(' in prototype");
 
 	std::vector<std::string> ArgNames;
 	while (getNextToken() == tok_identifier)
 		ArgNames.push_back(IdentifierStr);
 	if (CurTok != ')') // eat ')'
-		return ErrorP("Expected ')' in prototype");
+		return LogErrorP("Expected ')' in prototype");
 
 	getNextToken();
 
-	return new PrototypeAST(FnName, ArgNames);
+	return llvm::make_unique<PrototypeAST>(FnName, ArgNames);
 }
 
 /// definition
 /// ::= 'def' prototype expression
-static FunctionAST *ParseDefinition() {
+static std::unique_ptr<FunctionAST> ParseDefinition() {
 	getNextToken(); //eat def.
-	PrototypeAST *Proto = ParsePrototype();
+	auto Proto = ParsePrototype();
 	if (Proto == 0) return 0;
 
-	if (ExprAST *E = ParseExpression())
-		return new FunctionAST(Proto, E);
+	if (auto E = ParseExpression())
+		return llvm::make_unique<FunctionAST>(Proto, E);
 	return 0;
 }
 
 /// external
 /// ::= 'extern' prototype
-static PrototypeAST *ParseExtern() {
+static  std::unique_ptr<PrototypeAST> ParseExtern() {
 	getNextToken();
 	return ParsePrototype();
 }
@@ -314,10 +315,10 @@ static PrototypeAST *ParseExtern() {
 // 顶层表达式
 /// toplevelexpr
 /// ::= expression
-static FunctionAST *ParseTopLevelExpr() {
-	if (ExprAST *E = ParseExpression()) {
+static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
+	if (auto E = ParseExpression()) {
 		PrototypeAST *Proto = new PrototypeAST("", std::vector<std::string>());
-		return new FunctionAST(Proto, E);
+		return llvm::make_unique<FunctionAST>(Proto, E);
 	}
 	return 0;
 }
