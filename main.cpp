@@ -324,6 +324,31 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
 }
 
 //===----------------------------------------------------------------------===//
+// Code Generation
+//===----------------------------------------------------------------------===//
+
+static LLVMContext TheContext;
+static IRBuilder<> Builder(TheContext);
+static std::unique_ptr<Module> TheModule;
+static std::map<std::string, Value *> NamedValues;
+
+Value *LogErrorV(const char *Str) {
+	LogError(Str);
+	return nullptr;
+}
+
+Value *NumberExprAST::Codegen() {
+	return ConstantFP::get(TheContext, APFloat(Val));
+}
+
+Value *VariableExprAST::Codegen() {
+	Value *V = NamedValues[Name];
+	if (!V)
+		return LogErrorV("Unknown variable name");
+	return V;
+}
+
+//===----------------------------------------------------------------------===//
 // Top-Level parsing
 //===----------------------------------------------------------------------===//
 
