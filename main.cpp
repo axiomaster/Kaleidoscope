@@ -1,12 +1,18 @@
-#include <string>
-#include <cctype>
-#include <cstdio>
+ï»¿#include "llvm/IR/Verifier.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+
 #include <cstdlib>
+#include <cstdio>
 #include <map>
 #include <vector>
 
+using namespace llvm;
+
 //===----------------------------------------------------------------------===//
-// ´Ê·¨·ÖÎö
+// è¯æ³•åˆ†æ
 //===----------------------------------------------------------------------===//
 enum Token {
 	tok_eof = -1,
@@ -18,7 +24,7 @@ enum Token {
 static std::string IdentifierStr; //tok_identifier
 static double NumVal;             //tok_number
 
-/// ·µ»ØÏÂÒ»¸ötoken
+/// è¿”å›ä¸‹ä¸€ä¸ªtoken
 static int gettok() {
 	static int LastChar = ' ';
 	
@@ -34,7 +40,7 @@ static int gettok() {
 		if (IdentifierStr == "extern") return tok_extern;
 		return tok_identifier;
 	}
-	//Êı×Ö
+	//æ•°å­—
 	if (isdigit(LastChar) || LastChar == '.') {
 		std::string NumStr;
 		do {
@@ -44,13 +50,13 @@ static int gettok() {
 		NumVal = strtod(NumStr.c_str(), 0);
 		return tok_number;
 	}
-	//×¢ÊÍ
+	//æ³¨é‡Š
 	if (LastChar == '#') {
 		do LastChar = getchar();
 		while (LastChar != EOF && LastChar != '\n' && LastChar != '\r');
 
 		if (LastChar != EOF)
-			return gettok(); //Ìø¹ı
+			return gettok(); //è·³è¿‡
 	}
 
 	if (LastChar == EOF)
@@ -64,65 +70,73 @@ static int gettok() {
 //===----------------------------------------------------------------------===//
 // AST
 //===----------------------------------------------------------------------===//
-class ExprAST {
-public:
-	virtual ~ExprAST(){}
-};
+namespace {
+	class ExprAST {
+	public:
+		virtual ~ExprAST() {}
+		virtual Value *Codegen() = 0;
+	};
 
-class NumberExprAST :public ExprAST {
-	double Val;
-public:
-	NumberExprAST(double val):Val(val){}
-};
+	class NumberExprAST :public ExprAST {
+		double Val;
+	public:
+		NumberExprAST(double val) :Val(val) {}
+		virtual Value *Codegen();
+	};
 
-// ±äÁ¿
-class VariableExprAST :public ExprAST {
-	std::string Name;
-public:
-	VariableExprAST(const std::string &name):Name(name){}
-};
+	// å˜é‡
+	class VariableExprAST :public ExprAST {
+		std::string Name;
+	public:
+		VariableExprAST(const std::string &name) :Name(name) {}
+		virtual Value *Codegen();
+	};
 
-// ÔËËã·û
-class BinaryExprAST :public ExprAST {
-	char Op;
-	ExprAST *LHS, *RHS;
-public:
-	BinaryExprAST(char op, ExprAST *lhs, ExprAST *rhs)
-		:Op(op), LHS(lhs), RHS(rhs){}
-};
+	// è¿ç®—ç¬¦
+	class BinaryExprAST :public ExprAST {
+		char Op;
+		ExprAST *LHS, *RHS;
+	public:
+		BinaryExprAST(char op, ExprAST *lhs, ExprAST *rhs)
+			:Op(op), LHS(lhs), RHS(rhs) {}
+		virtual Value *Codegen();
+	};
 
-// º¯Êıµ÷ÓÃ£¿£¿£¿
-class CallExprAST :public ExprAST {
-	std::string Callee;
-	std::vector<ExprAST*> Args;
-public:
-	CallExprAST(const std::string &callee, std::vector<ExprAST*> &args)
-		: Callee(callee), Args(args){}
-};
+	// å‡½æ•°è°ƒç”¨ï¼Ÿï¼Ÿï¼Ÿ
+	class CallExprAST :public ExprAST {
+		std::string Callee;
+		std::vector<ExprAST*> Args;
+	public:
+		CallExprAST(const std::string &callee, std::vector<ExprAST*> &args)
+			: Callee(callee), Args(args) {}
+		virtual Value *Codegen();
+	};
 
-// º¯ÊıÔ­ĞÍ
-class PrototypeAST {
-	std::string Name;
-	std::vector<std::string> Args;
-public:
-	PrototypeAST(const std::string &name, const std::vector<std::string> &args)
-		:Name(name), Args(args){}
-};
+	// å‡½æ•°åŸå‹
+	class PrototypeAST {
+		std::string Name;
+		std::vector<std::string> Args;
+	public:
+		PrototypeAST(const std::string &name, const std::vector<std::string> &args)
+			:Name(name), Args(args) {}
+	};
 
-class FunctionAST {
-	PrototypeAST *Proto;
-	ExprAST *Body;
-public:
-	FunctionAST(PrototypeAST *proto, ExprAST *body)
-		:Proto(proto), Body(body){}
-};
+	class FunctionAST {
+		PrototypeAST *Proto;
+		ExprAST *Body;
+	public:
+		FunctionAST(PrototypeAST *proto, ExprAST *body)
+			:Proto(proto), Body(body) {}
+	};
+}
+
 
 //===----------------------------------------------------------------------===//
 // parser
 //===----------------------------------------------------------------------===//
 
 static int CurTok;
-static int getNextToken() { //Ìø¹ıÒ»¸ötoken
+static int getNextToken() { //è·³è¿‡ä¸€ä¸ªtoken
 	return CurTok = gettok();
 }
 
@@ -159,7 +173,7 @@ static ExprAST *ParseNumberExpr() {
 	return Result;
 }
 
-// À¨ºÅ±í´ïÊ½ '('expression')'
+// æ‹¬å·è¡¨è¾¾å¼ '('expression')'
 /// parenexpr ::= '('expression')'
 static ExprAST *ParseParenExpr() {
 	getNextToken(); //'('
@@ -173,8 +187,8 @@ static ExprAST *ParseParenExpr() {
 	return V;
 }
 
-// ±äÁ¿ÒıÓÃ£º identifier
-// º¯Êıµ÷ÓÃ£º identifier'('expression')'
+// å˜é‡å¼•ç”¨ï¼š identifier
+// å‡½æ•°è°ƒç”¨ï¼š identifier'('expression')'
 /// identifierexpr
 /// ::= identifier
 /// ::= identifier '(' expression* ')'
@@ -183,9 +197,9 @@ static ExprAST *ParseIdentifierExpr() {
 
 	getNextToken();
 	
-	if (CurTok != '(') //±äÁ¿ÒıÓÃ
+	if (CurTok != '(') //å˜é‡å¼•ç”¨
 		return new VariableExprAST(IdName);
-	// º¯Êıµ÷ÓÃ
+	// å‡½æ•°è°ƒç”¨
 	getNextToken(); // eat '('
 	std::vector<ExprAST*> Args;
 	if (CurTok != ')') {
@@ -206,7 +220,7 @@ static ExprAST *ParseIdentifierExpr() {
 	return new CallExprAST(IdName, Args);
 }
 
-// Ò»Ôª±í´ïÊ½
+// ä¸€å…ƒè¡¨è¾¾å¼
 /// primary
 /// ::= identifier
 /// ::= numberexpr
@@ -254,7 +268,7 @@ static ExprAST *ParseExpression() {
 	
 	return ParseBinOpRHS(0, LHS);
 }
-// º¯ÊıÔ­ĞÍ
+// å‡½æ•°åŸå‹
 /// prototype
 /// ::= id '(' id* ')'
 static PrototypeAST *ParsePrototype() {
@@ -297,7 +311,7 @@ static PrototypeAST *ParseExtern() {
 	return ParsePrototype();
 }
 
-// ¶¥²ã±í´ïÊ½
+// é¡¶å±‚è¡¨è¾¾å¼
 /// toplevelexpr
 /// ::= expression
 static FunctionAST *ParseTopLevelExpr() {
