@@ -3,12 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.8)
 
-SET(CMAKE_C_COMPILER "/usr/local/clang-9.0.0/bin/clang")
-SET(CMAKE_CXX_COMPILER "/usr/local/clang-9.0.0/bin/clang++")
-SET(CMAKE_C_FLAGS "-Wall -std=c11")
-
 include_directories(/usr/local/clang-9.0.0/include/)
-
 
 # 将源代码添加到此项目的可执行文件。
 add_executable(Kaleidoscope "Kaleidoscope.cpp")
