@@ -2,3 +2,6 @@ build/
 llvm/
 cmake-build-debug/
 .idea/
+out/
+.vs
+CMakeSettings.json
