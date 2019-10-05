@@ -5,3 +5,11 @@ cmake-build-debug/
 out/
 .vs
 CMakeSettings.json
+CMakeFiles
+.vscode
+Kaleidoscope/CMakeFiles
+Kaleidoscope/out
+
+*cmake
+Makefile
+CMakeCache.txt
