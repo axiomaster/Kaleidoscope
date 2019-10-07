@@ -3,11 +3,14 @@
 #
 cmake_minimum_required(VERSION 3.8)
 
-SET(CMAKE_C_COMPILER "/usr/local/clang-9.0.0/bin/clang")
-SET(CMAKE_CXX_COMPILER "/usr/local/clang-9.0.0/bin/clang++")
-SET(CMAKE_C_FLAGS "-Wall -std=c11")
-
 project("Kaleidoscope")
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_BUILD_TYPE Debug)
+
+SET(CMAKE_C_COMPILER "/usr/bin/clang")
+SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
 
 # 包含子项目。
 add_subdirectory("Kaleidoscope")
+
